@@ -7,9 +7,11 @@
 #include <errno.h>
 
 #include <atomic>
-#include <string>
-#include <utility>
+#include <chrono>
 #include <cstring>
+#include <string>
+#include <thread>
+#include <utility>
 
 #include "libipc/shm.h"
 #include "libipc/def.h"
@@ -40,6 +42,23 @@ inline auto& acc_of(void* mem, std::size_t size) {
     return reinterpret_cast<info_t*>(static_cast<ipc::byte_t*>(mem) + size - sizeof(info_t))->acc_;
 }
 
+#if defined(LIBIPC_OS_APPLE)
+// A second opener can see size 0 between the creator's shm_open() and ftruncate(); wait for the
+// creator rather than unlinking an object that existing openers may have already acquired.
+inline bool wait_until_sized(const int fd, const std::size_t size, struct stat &st) noexcept {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    for (unsigned attempt = 0; st.st_size == 0; ++attempt) {
+        if (std::chrono::steady_clock::now() >= deadline) return false;
+        if (attempt < 64)
+            std::this_thread::yield();
+        else
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+        if (::fstat(fd, &st) != 0) return false;
+    }
+    return static_cast<std::size_t>(st.st_size) >= size;
+}
+#endif
+
 } // internal-linkage
 
 namespace ipc {
@@ -56,8 +75,14 @@ id_t acquire(char const * name, std::size_t size, unsigned mode) {
     int flag = O_RDWR;
     switch (mode) {
     case open:
+#if defined(LIBIPC_OS_APPLE)
+        // macOS fstat reports page-rounded sizes. Keep the requested size so
+        // all mappings place the shared reference counter at the same offset.
+        break;
+#else
         size = 0;
         break;
+#endif
     // The check for the existence of the object, 
     // and its creation if it does not exist, are performed atomically.
     case create:
@@ -144,8 +169,43 @@ void * get_mem(id_t id, std::size_t * size) {
     else {
         ii->size_ = calc_size(ii->size_);
         if (::ftruncate(fd, static_cast<off_t>(ii->size_)) != 0) {
-            log.error("fail ftruncate[", errno, "]: ", ii->name_, ", size = ", ii->size_);
-            return nullptr;
+#if defined(LIBIPC_OS_APPLE)
+            if (errno == EINVAL) {
+                struct stat st{};
+                bool already_sized =
+                    ::fstat(fd, &st) == 0 && static_cast<std::size_t>(st.st_size) >= ii->size_;
+                if (!already_sized && st.st_size == 0) {
+                    already_sized = wait_until_sized(fd, ii->size_, st);
+                }
+
+                if (!already_sized) {
+                    // A stale or abandoned zero-sized object cannot be resized on macOS: replace it
+                    // and size the new object.
+                    ::close(fd);
+                    ii->fd_ = -1;
+                    ::shm_unlink(ii->name_.c_str());
+                    fd = ::shm_open(ii->name_.c_str(),
+                                    O_RDWR | O_CREAT,
+                                    S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
+                    if (fd == -1) {
+                        log.error("fail shm_open (recreate)[", errno, "]: ", ii->name_);
+                        return nullptr;
+                    }
+                    ii->fd_ = fd;
+                    if (::ftruncate(fd, static_cast<off_t>(ii->size_)) != 0) {
+                        log.error("fail ftruncate (retry)[", errno, "]: ", ii->name_, ", size = ", ii->size_);
+                        ::close(fd);
+                        ii->fd_ = -1;
+                        return nullptr;
+                    }
+                }
+            }
+            else
+#endif
+            {
+                log.error("fail ftruncate[", errno, "]: ", ii->name_, ", size = ", ii->size_);
+                return nullptr;
+            }
         }
     }
     void* mem = ::mmap(nullptr, ii->size_, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);

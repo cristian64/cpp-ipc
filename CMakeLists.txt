@@ -10,10 +10,20 @@ option(LIBIPC_CODECOV           "Build with unit test coverage."                
 # Option for shortening long names automatically; intended for platforms that limit shm names length. If set to 0, the
 # feature is disabled.
 if (NOT DEFINED LIBIPC_SHM_NAME_MAX)
-    set(LIBIPC_SHM_NAME_MAX 0 CACHE STRING "Maximum POSIX shm/semaphore name length including slash (0 disables shortening).")
+    if (APPLE)
+        # macOS limits POSIX shared-memory and semaphore names to 30 characters.
+        set(LIBIPC_SHM_NAME_MAX 30 CACHE STRING "Maximum POSIX shm/semaphore name length including slash (0 disables shortening).")
+    else ()
+        set(LIBIPC_SHM_NAME_MAX 0 CACHE STRING "Maximum POSIX shm/semaphore name length including slash (0 disables shortening).")
+    endif ()
 endif ()
 if (LIBIPC_SHM_NAME_MAX GREATER 0 AND LIBIPC_SHM_NAME_MAX LESS 18)
     message(FATAL_ERROR "LIBIPC_SHM_NAME_MAX must be 0 (disabled) or at least 18.")
+endif ()
+if (APPLE)
+    if (LIBIPC_SHM_NAME_MAX EQUAL 0 OR LIBIPC_SHM_NAME_MAX GREATER 30)
+        message(FATAL_ERROR "Apple platforms require LIBIPC_SHM_NAME_MAX set to 30 or less.")
+    endif ()
 endif ()
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)

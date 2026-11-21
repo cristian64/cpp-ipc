@@ -48,3 +48,16 @@ jobs:
           cmake -DCMAKE_BUILD_TYPE=Release -DLIBIPC_BUILD_TESTS=ON .
           cmake --build .
           ./bin/test-ipc
+
+  build-macos:
+
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v7
+    - name: cmake
+      run: cmake -DCMAKE_BUILD_TYPE=Release -DLIBIPC_BUILD_TESTS=ON .
+    - name: make
+      run: cmake --build . --parallel
+    - name: test
+      run: ./bin/test-ipc
