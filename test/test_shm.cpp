@@ -573,3 +573,21 @@ TEST_F(ShmTest, LargeSegment) {
       }
   }
 }
+
+// Test long names do not suffer from collisions. The test is particularly relevant in platforms
+// that limit the length of POSIX shm/semaphore names (e.g. Apple).
+TEST_F(ShmTest, LongNames) {
+  const std::string base = generate_unique_name("long_shm_name") + std::string(100, 'x');
+  const std::string name_a = base + "_a";
+  const std::string name_b = base + "_b";
+
+  shm::handle first(name_a.c_str(), sizeof(int));
+  shm::handle second(name_b.c_str(), sizeof(int));
+  ASSERT_TRUE(first.valid());
+  ASSERT_TRUE(second.valid());
+
+  *static_cast<int *>(first.get()) = 17;
+  *static_cast<int *>(second.get()) = 29;
+  EXPECT_EQ(*static_cast<int *>(first.get()), 17);
+  EXPECT_EQ(*static_cast<int *>(second.get()), 29);
+}

@@ -7,6 +7,15 @@ option(LIBIPC_BUILD_SHARED_LIBS "Build shared libraries (DLLs)."                
 option(LIBIPC_USE_STATIC_CRT    "Set to ON to build with static CRT on Windows (/MT)."  OFF)
 option(LIBIPC_CODECOV           "Build with unit test coverage."                        OFF)
 
+# Option for shortening long names automatically; intended for platforms that limit shm names length. If set to 0, the
+# feature is disabled.
+if (NOT DEFINED LIBIPC_SHM_NAME_MAX)
+    set(LIBIPC_SHM_NAME_MAX 0 CACHE STRING "Maximum POSIX shm/semaphore name length including slash (0 disables shortening).")
+endif ()
+if (LIBIPC_SHM_NAME_MAX GREATER 0 AND LIBIPC_SHM_NAME_MAX LESS 18)
+    message(FATAL_ERROR "LIBIPC_SHM_NAME_MAX must be 0 (disabled) or at least 18.")
+endif ()
+
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -DNDEBUG")

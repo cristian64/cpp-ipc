@@ -17,6 +17,7 @@
 #include "libipc/imp/log.h"
 #include "libipc/mem/resource.h"
 #include "libipc/mem/new.h"
+#include "libipc/platform/posix/shm_name.h"
 
 namespace {
 
@@ -50,14 +51,7 @@ id_t acquire(char const * name, std::size_t size, unsigned mode) {
         log.error("fail acquire: name is empty");
         return nullptr;
     }
-    // For portable use, a shared memory object should be identified by name of the form /somename.
-    // see: https://man7.org/linux/man-pages/man3/shm_open.3.html
-    std::string op_name;
-    if (name[0] == '/') {
-        op_name = name;
-    } else {
-        op_name = std::string{"/"} + name;
-    }
+    std::string op_name = ipc::posix_::detail::make_shm_name(name);
     // Open the object for read-write access.
     int flag = O_RDWR;
     switch (mode) {
@@ -215,13 +209,7 @@ void remove(char const * name) noexcept {
         log.error("fail remove: name is empty");
         return;
     }
-    // For portable use, a shared memory object should be identified by name of the form /somename.
-    std::string op_name;
-    if (name[0] == '/') {
-        op_name = name;
-    } else {
-        op_name = std::string{"/"} + name;
-    }
+    const std::string op_name = ipc::posix_::detail::make_shm_name(name);
     int unlink_ret = ::shm_unlink(op_name.c_str());
     if (unlink_ret == -1) {
         log.error("fail shm_unlink[", errno, "]: ", op_name);

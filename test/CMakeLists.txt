@@ -30,6 +30,13 @@ list(FILTER HEAD_FILES EXCLUDE REGEX "archive")
 
 add_executable(${PROJECT_NAME} ${SRC_FILES} ${HEAD_FILES})
 
+if (LIBIPC_SHM_NAME_MAX GREATER 0)
+  target_compile_definitions(
+    ${PROJECT_NAME}
+    PRIVATE LIBIPC_SHM_NAME_MAX=${LIBIPC_SHM_NAME_MAX}
+  )
+endif ()
+
 link_directories(${LIBIPC_PROJECT_DIR}/3rdparty/gperftools)
 target_link_libraries(${PROJECT_NAME} gtest gtest_main ipc)
 #target_link_libraries(${PROJECT_NAME} tcmalloc_minimal)

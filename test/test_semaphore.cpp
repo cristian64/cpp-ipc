@@ -298,6 +298,27 @@ TEST_F(SemaphoreTest, MultipleProducersConsumers) {
   EXPECT_EQ(total_consumed.load(), items_per_producer * num_producers);
 }
 
+// Test long names do not suffer from collisions. The test is particularly relevant in platforms
+// that limit the length of POSIX shm/semaphore names (e.g. Apple).
+TEST_F(SemaphoreTest, LongNames) {
+  const std::string base = generate_unique_sem_name("long_semaphore_name") + std::string(100, 'x');
+  const std::string name_a = base + "_a";
+  const std::string name_b = base + "_b";
+
+  semaphore sem_a(name_a.c_str(), 0);
+  semaphore sem_b(name_b.c_str(), 0);
+  ASSERT_TRUE(sem_a.valid());
+  ASSERT_TRUE(sem_b.valid());
+
+  EXPECT_TRUE(sem_a.post());
+  EXPECT_FALSE(sem_b.wait(10));
+  EXPECT_TRUE(sem_a.wait(100));
+
+  EXPECT_TRUE(sem_b.post());
+  EXPECT_FALSE(sem_a.wait(10));
+  EXPECT_TRUE(sem_b.wait(100));
+}
+
 // Test semaphore with initial count
 TEST_F(SemaphoreTest, InitialCount) {
   std::string name = generate_unique_sem_name("initial_count");

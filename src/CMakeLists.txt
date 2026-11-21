@@ -28,6 +28,13 @@ else()
   add_library(${PROJECT_NAME} STATIC ${SRC_FILES} ${HEAD_FILES})
 endif()
 
+if (LIBIPC_SHM_NAME_MAX GREATER 0)
+  target_compile_definitions(
+    ${PROJECT_NAME}
+    PRIVATE LIBIPC_SHM_NAME_MAX=${LIBIPC_SHM_NAME_MAX}
+  )
+endif ()
+
 # set output directory
 set_target_properties(${PROJECT_NAME}
 	PROPERTIES

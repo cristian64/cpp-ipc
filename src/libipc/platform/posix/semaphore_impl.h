@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 #include <fcntl.h>      /* For O_* constants */
 #include <sys/stat.h>   /* For mode constants */
@@ -11,6 +12,7 @@
 #include "libipc/shm.h"
 
 #include "get_wait_time.h"
+#include "shm_name.h"
 
 namespace ipc {
 namespace detail {
@@ -36,17 +38,14 @@ public:
     bool open(char const *name, std::uint32_t count) noexcept {
         LIBIPC_LOG();
         close();
+        if (!name) return false;
         if (!shm_.acquire(name, 1)) {
             log.error("[open_semaphore] fail shm.acquire: ", name);
             return false;
         }
-        // POSIX semaphore names must start with "/" on some platforms (e.g., FreeBSD)
-        // Use a separate namespace for semaphores to avoid conflicts with shm
-        if (name[0] == '/') {
-            sem_name_ = std::string(name) + "_sem";
-        } else {
-            sem_name_ = std::string("/") + name + "_sem";
-        }
+        // Use a separate namespace for semaphores to avoid conflicts with shm.
+        const std::string name_with_suffix = std::string{name} + "_sem";
+        sem_name_ = ipc::posix_::detail::make_shm_name(name_with_suffix.c_str());
         h_ = ::sem_open(sem_name_.c_str(), O_CREAT, 0666, static_cast<unsigned>(count));
         if (h_ == SEM_FAILED) {
             log.error("fail sem_open[", errno, "]: ", sem_name_);
@@ -88,13 +87,11 @@ public:
     }
 
     static void clear_storage(char const *name) noexcept {
+        if (!name) return;
+
         // Construct the semaphore name same way as open() does
-        std::string sem_name;
-        if (name[0] == '/') {
-            sem_name = std::string(name) + "_sem";
-        } else {
-            sem_name = std::string("/") + name + "_sem";
-        }
+        const std::string name_with_suffix = std::string{name} + "_sem";
+        const std::string sem_name = ipc::posix_::detail::make_shm_name(name_with_suffix.c_str());
         ::sem_unlink(sem_name.c_str());
         ipc::shm::handle::clear_storage(name);
     }
