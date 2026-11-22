@@ -12,13 +12,17 @@
  * - Multiple wait/post scenarios
  */
 
-#include <gtest/gtest.h>
-#include <thread>
-#include <chrono>
+#include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <string>
+#include <thread>
 #include <vector>
-#include "libipc/semaphore.h"
+
+#include <gtest/gtest.h>
+
 #include "libipc/def.h"
+#include "libipc/semaphore.h"
 
 using namespace ipc;
 using namespace ipc::sync;
@@ -369,6 +373,53 @@ TEST_F(SemaphoreTest, ConcurrentPost) {
   }
   
   EXPECT_EQ(consumed, threads * posts_per_thread);
+}
+
+// Test opening the same named semaphore concurrently
+TEST_F(SemaphoreTest, OpenConcurrently) {
+  const auto concurrency = std::max(8u, std::thread::hardware_concurrency());
+  const std::string base_name = generate_unique_sem_name("open_concurrently");
+
+  constexpr int iterations = 100;
+  for (int i = 1; i <= iterations; ++i) {
+    std::vector<semaphore> sems(concurrency);
+
+    {
+      const std::string name = base_name + "_" + std::to_string(i);
+      const char* const name_str = name.c_str();
+
+      std::vector<std::thread> threads;
+      threads.reserve(concurrency);
+
+      std::atomic<int> ready{0};
+      std::atomic<bool> blocked{true};
+
+      for (auto &sem : sems) {
+        threads.emplace_back([&] {
+          ++ready;
+          while (blocked) {}  // Synchronization point for all threads
+          sem.open(name_str, 0);
+        });
+      }
+
+      while (ready < concurrency) {  // Wait until all threads are ready to open
+        std::this_thread::yield();
+      }
+      blocked = false;  // Unblock all threads at once
+
+      for (auto &thread : threads) {
+        thread.join();
+      }
+    }
+
+    ASSERT_TRUE(sems[0].valid());
+    EXPECT_TRUE(sems[0].post(concurrency));
+
+    for (auto &sem : sems) {
+      ASSERT_TRUE(sem.valid());
+      EXPECT_TRUE(sem.wait(1000));
+    }
+  }
 }
 
 // Test reopen after close

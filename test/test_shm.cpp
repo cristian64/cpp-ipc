@@ -10,10 +10,16 @@
  * - Resource cleanup and error handling
  */
 
-#include <gtest/gtest.h>
+#include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <memory>
 #include <string>
+#include <thread>
+#include <vector>
+
+#include <gtest/gtest.h>
+
 #include "libipc/shm.h"
 
 using namespace ipc;
@@ -80,6 +86,54 @@ TEST_F(ShmTest, AcquireCreateOrOpen) {
   
   // Use remove(id) to clean up - it internally calls release()
   shm::remove(id);
+}
+
+// Test acquire concurrently
+TEST_F(ShmTest, AcquireConcurrently) {
+  const auto concurrency = std::max(8u, std::thread::hardware_concurrency());
+  const std::string base_name = generate_unique_name("acquire_concurrently");
+
+  constexpr int iterations = 100;
+  for (int i = 1; i <= iterations; ++i) {
+    std::vector<shm::handle> handles(concurrency);
+
+    {
+      const std::string name = base_name + "_" + std::to_string(i);
+      const char* const name_str = name.c_str();
+
+      std::vector<std::thread> threads;
+      threads.reserve(concurrency);
+
+      std::atomic<int> ready{0};
+      std::atomic<bool> blocked{true};
+
+      for (auto &handle : handles) {
+        threads.emplace_back([&] {
+          ++ready;
+          while (blocked) {}  // Synchronization point for all threads
+          handle.acquire(name_str, sizeof(int));
+        });
+      }
+
+      while (ready < concurrency) {  // Wait until all threads are ready to acquire
+        std::this_thread::yield();
+      }
+      blocked = false;  // Unblock all threads at once
+
+      for (auto &thread : threads) {
+        thread.join();
+      }
+    }
+
+    ASSERT_TRUE(handles[0].valid());
+    const int data = i;
+    *static_cast<int *>(handles[0].get()) = data;
+
+    for (const auto &handle : handles) {
+      ASSERT_TRUE(handle.valid());
+      EXPECT_EQ(*static_cast<int *>(handle.get()), data);  // All handles should show the same data
+    }
+  }
 }
 
 // Test get_mem function
