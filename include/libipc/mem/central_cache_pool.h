@@ -51,8 +51,9 @@ public:
   block_t *aqueire() noexcept {
     auto *n = cached_.pop();
     if (n != nullptr) {
+      block_t *const value = n->value;  // Save value before pushing to the stack
       aqueired_.push(n);
-      return n->value;
+      return value;
     }
     auto *chunk = central_cache_allocator().construct<chunk_t>();
     if (chunk == nullptr) {
@@ -102,8 +103,9 @@ public:
   block_t *aqueire() noexcept {
     auto *n = cached_.pop();
     if (n != nullptr) {
+      block_t *const value = n->value;  // Save value before pushing to the stack
       aqueired_.push(n);
-      return n->value;
+      return value;
     }
     // For pools with no default expansion size, 
     // the central cache pool is only buffered, not allocated.
