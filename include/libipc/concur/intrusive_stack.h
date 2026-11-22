@@ -6,6 +6,9 @@
 #pragma once
 
 #include <atomic>
+#include <mutex>
+
+#include "libipc/rw_lock.h"
 
 namespace ipc {
 namespace concur {
@@ -28,6 +31,7 @@ public:
 
 private:
   std::atomic<node *> top_{nullptr};
+  ipc::spin_lock lock_;
 
 public:
   intrusive_stack(intrusive_stack const &) = delete;
@@ -42,22 +46,19 @@ public:
   }
 
   void push(node *n) noexcept {
-    node *old_top = top_.load(std::memory_order_acquire);
-    do {
-      n->next.store(old_top, std::memory_order_relaxed);
-    } while (!top_.compare_exchange_weak(old_top, n, std::memory_order_release
-                                                   , std::memory_order_acquire));
+    std::lock_guard guard{lock_};
+    node *const old_top = top_.load(std::memory_order_relaxed);
+    n->next.store(old_top, std::memory_order_relaxed);
+    top_.store(n, std::memory_order_release);
   }
 
   node *pop() noexcept {
-    node *old_top = top_.load(std::memory_order_acquire);
-    do {
-      if (old_top == nullptr) {
-        return nullptr;
-      }
-    } while (!top_.compare_exchange_weak(old_top, old_top->next.load(std::memory_order_relaxed)
-                                                , std::memory_order_release
-                                                , std::memory_order_acquire));
+    std::lock_guard guard{lock_};
+    node *const old_top = top_.load(std::memory_order_relaxed);
+    if (old_top == nullptr) {
+      return nullptr;
+    }
+    top_.store(old_top->next.load(std::memory_order_relaxed), std::memory_order_release);
     return old_top;
   }
 };

@@ -1,3 +1,6 @@
+#include <array>
+#include <atomic>
+#include <vector>
 
 #include "../archive/test.h"
 
@@ -100,4 +103,59 @@ TEST(intrusive_stack, pop_many) {
   EXPECT_EQ(n1.value, 111111);
   EXPECT_EQ(n2.value, 222222);
   EXPECT_EQ(n3.value, 333333);
+}
+
+TEST(intrusive_stack, concurrent_push_pop) {
+  constexpr std::size_t node_count = 64;
+  constexpr unsigned thread_count = 8;
+  constexpr int ops_per_thread = 200000;
+
+  concur::intrusive_stack<int> s;
+  std::array<concur::intrusive_stack<int>::node, node_count> nodes;
+  std::array<std::atomic<bool>, node_count> in_use;
+  for (std::size_t i = 0; i < node_count; ++i) {
+    nodes[i].value = static_cast<int>(i);
+    nodes[i].next.store(nullptr, std::memory_order_relaxed);
+    in_use[i].store(false, std::memory_order_relaxed);
+    s.push(&nodes[i]);
+  }
+
+  std::atomic<int> errors{0};
+  std::vector<std::thread> threads;
+  threads.reserve(thread_count);
+  for (unsigned t = 0; t < thread_count; ++t) {
+    threads.emplace_back([&] {
+      for (int i = 0; i < ops_per_thread; ++i) {
+        auto *n = s.pop();
+        if (n == nullptr) {
+          errors.fetch_add(1, std::memory_order_relaxed);
+          return;
+        }
+        const auto idx = static_cast<std::size_t>(n->value);
+        if ((idx >= node_count) ||
+            in_use[idx].exchange(true, std::memory_order_acq_rel)) {
+          errors.fetch_add(1, std::memory_order_relaxed);
+          return;
+        }
+        std::this_thread::yield();
+        in_use[idx].store(false, std::memory_order_release);
+        s.push(n);
+      }
+    });
+  }
+  for (auto &thread : threads) {
+    thread.join();
+  }
+  ASSERT_EQ(errors.load(std::memory_order_relaxed), 0);
+
+  std::array<bool, node_count> seen{};
+  for (std::size_t i = 0; i < node_count; ++i) {
+    auto *n = s.pop();
+    ASSERT_NE(n, nullptr);
+    const auto idx = static_cast<std::size_t>(n->value);
+    ASSERT_LT(idx, node_count);
+    EXPECT_FALSE(seen[idx]);
+    seen[idx] = true;
+  }
+  EXPECT_TRUE(s.empty());
 }
